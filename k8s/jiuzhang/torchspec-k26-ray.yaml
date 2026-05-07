@@ -1,0 +1,174 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: torchspec-k26-head
+  namespace: torchspec-k26
+  labels:
+    app: torchspec-k26
+    role: head
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  nodeName: host-172-31-13-51
+  imagePullSecrets:
+  - name: novitalabs
+  containers:
+  - name: head
+    image: ghcr.io/novitalabs/sglang:dev-v0.5.8-35ed9a4-cu129
+    securityContext:
+      privileged: true
+      capabilities:
+        add: ["IPC_LOCK"]
+    env:
+    - name: HF_HOME
+      value: /data1
+    - name: HTTP_PROXY
+      value: http://127.0.0.1:1081
+    - name: HTTPS_PROXY
+      value: http://127.0.0.1:1081
+    - name: ALL_PROXY
+      value: http://127.0.0.1:1081
+    - name: MC_STORE_MEMCPY
+      value: "0"
+    - name: SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN
+      value: "1"
+    - name: SGLANG_DISABLE_CUDNN_CHECK
+      value: "1"
+    - name: TORCHSPEC_LOG_DIR
+      value: /data1/logs/torchspec-k8s
+    - name: FLASHINFER_DISABLE_VERSION_CHECK
+      value: "1"
+    command: ["bash", "-lc"]
+    args:
+    - |
+      set -euxo pipefail
+      cd /root/work/TorchSpec
+      export PIP_CACHE_DIR=/data1/cache/pip
+      python3 -m pip install "ray[default]"
+      python3 -m pip install -e ".[vllm]"
+      mkdir -p /data1/logs/torchspec-k8s /data1/training/torchspec_k26_jiuzhang_vllm_smoke /data1/cache/torchspec_k26_jiuzhang_vllm_smoke
+      ray stop --force || true
+      ray start --head --port=6380 --dashboard-host=0.0.0.0 --node-ip-address=172.31.13.51 --num-gpus=8 --temp-dir=/tmp/ray_torchspec_k26 --disable-usage-stats
+      echo "head ready" | tee /data1/logs/torchspec-k8s/head.ready
+      while [ ! -f /data1/logs/torchspec-k8s/start-training ]; do sleep 5; done
+      export RAY_ADDRESS=172.31.13.51:6380
+      python3 -m torchspec.train_entry --config /root/work/TorchSpec/configs/vllm_kimi_k26_2node_jiuzhang_smoke.yaml \
+        model.draft_model_config=/root/work/TorchSpec/configs/draft_models/kimi_k25_eagle3.json \
+        mooncake.protocol=tcp \
+        mooncake.master_server_address=null \
+        mooncake.metadata_server=null \
+        training.num_train_steps=2 \
+        training.num_epochs=1 \
+        dataset.last_turn_loss_only=true \
+        2>&1 | tee /data1/logs/torchspec-k8s/train.log
+      touch /data1/logs/torchspec-k8s/training.done
+      sleep infinity
+    resources:
+      limits:
+        nvidia.com/gpu: 8
+    volumeMounts:
+    - name: dshm
+      mountPath: /dev/shm
+    - name: data
+      mountPath: /data1
+    - name: torchspec
+      mountPath: /root/work/TorchSpec
+  volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+      sizeLimit: 64Gi
+  - name: data
+    hostPath:
+      path: /data1
+      type: Directory
+  - name: torchspec
+    hostPath:
+      path: /root/work/TorchSpec
+      type: Directory
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: torchspec-k26-worker
+  namespace: torchspec-k26
+  labels:
+    app: torchspec-k26
+    role: worker
+spec:
+  restartPolicy: Never
+  hostNetwork: true
+  dnsPolicy: ClusterFirstWithHostNet
+  nodeName: host-172-31-13-65
+  imagePullSecrets:
+  - name: novitalabs
+  containers:
+  - name: worker
+    image: ghcr.io/novitalabs/sglang:dev-v0.5.8-35ed9a4-cu129
+    securityContext:
+      privileged: true
+      capabilities:
+        add: ["IPC_LOCK"]
+    env:
+    - name: HF_HOME
+      value: /data1
+    - name: HTTP_PROXY
+      value: http://127.0.0.1:1081
+    - name: HTTPS_PROXY
+      value: http://127.0.0.1:1081
+    - name: ALL_PROXY
+      value: http://127.0.0.1:1081
+    - name: MC_STORE_MEMCPY
+      value: "0"
+    - name: SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN
+      value: "1"
+    - name: SGLANG_DISABLE_CUDNN_CHECK
+      value: "1"
+    - name: TORCHSPEC_LOG_DIR
+      value: /data1/logs/torchspec-k8s
+    - name: FLASHINFER_DISABLE_VERSION_CHECK
+      value: "1"
+    command: ["bash", "-lc"]
+    args:
+    - |
+      set -euxo pipefail
+      cd /root/work/TorchSpec
+      export PIP_CACHE_DIR=/data1/cache/pip
+      python3 -m pip install "ray[default]"
+      python3 -m pip install -e ".[vllm]"
+      mkdir -p /data1/logs/torchspec-k8s
+      until python3 - <<"PY"
+      import socket
+      s=socket.socket(); s.settimeout(2)
+      s.connect(("172.31.13.51",6380))
+      s.close()
+      PY
+      do sleep 5; done
+      ray stop --force || true
+      ray start --address=172.31.13.51:6380 --node-ip-address=172.31.13.65 --num-gpus=8 --disable-usage-stats
+      echo "worker ready" | tee /data1/logs/torchspec-k8s/worker.ready
+      sleep infinity
+    resources:
+      limits:
+        nvidia.com/gpu: 8
+    volumeMounts:
+    - name: dshm
+      mountPath: /dev/shm
+    - name: data
+      mountPath: /data1
+    - name: torchspec
+      mountPath: /root/work/TorchSpec
+  volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+      sizeLimit: 64Gi
+  - name: data
+    hostPath:
+      path: /data1
+      type: Directory
+  - name: torchspec
+    hostPath:
+      path: /root/work/TorchSpec
+      type: Directory

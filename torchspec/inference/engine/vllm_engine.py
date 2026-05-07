@@ -170,18 +170,11 @@ class VllmEngine(InferenceEngine, RayActor):
                 f"{self.aux_hidden_state_layer_ids}"
             )
 
-        # Append the model's final layer to capture last_hidden_states
-        # (pre-norm) for target logit computation.  Index `num_hidden_layers`
-        # is vllm's reserved post-last-layer / pre-`norm` slot, so training
-        # can apply the model's final norm itself on top of this.
-        final_layer_id = num_layers
-        if final_layer_id not in self.aux_hidden_state_layer_ids:
-            self.aux_hidden_state_layer_ids.append(final_layer_id)
-            if self.rank == 0:
-                logger.info(
-                    f"Appended final layer {final_layer_id} for last_hidden_states: "
-                    f"{self.aux_hidden_state_layer_ids}"
-                )
+        if self.rank == 0:
+            logger.info(
+                "Using last captured aux hidden state as last_hidden_states for vLLM: "
+                f"{self.aux_hidden_state_layer_ids}"
+            )
 
         nnodes = getattr(self.args, "vllm_nnodes", 1)
         tp_size = nnodes * self.num_gpus_per_engine

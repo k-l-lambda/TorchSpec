@@ -164,7 +164,7 @@ class MooncakeHiddenStatesConnector(KVConnectorBase_V1, SupportsHMA):
         # The last aux layer is the model's final layer (appended by
         # VllmEngine for last_hidden_states capture).  Training hidden
         # states use the remaining layers.
-        self._num_training_layers = max(self.num_hidden_states - 1, 1)
+        self._num_training_layers = self.num_hidden_states
 
         # Scheduler-side state: track requests and pre-computed metadata
         self._active_requests: dict[str, Any] = {}
@@ -332,7 +332,7 @@ class MooncakeHiddenStatesConnector(KVConnectorBase_V1, SupportsHMA):
             # last aux layer (final model layer) → target logit computation
             split_at = self._num_training_layers * self._hidden_size
             hidden_states = all_hidden[:, :split_at]
-            last_hidden_states = all_hidden[:, -self._hidden_size :]
+            last_hidden_states = hidden_states_3d[:, -1, :]
 
             input_ids = request.token_ids.to(hidden_states.device)
 
