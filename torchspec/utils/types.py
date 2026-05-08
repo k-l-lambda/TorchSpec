@@ -49,4 +49,5 @@ class InferenceOutput:
     tensor_shapes: dict[str, tuple[int, ...]]
     tensor_dtypes: dict[str, torch.dtype] | None = None
     packed_loss_mask: str | None = None
+    input_ids_list: list[int] | None = None
     metadata: dict = field(default_factory=dict)

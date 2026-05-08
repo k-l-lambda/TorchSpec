@@ -55,14 +55,46 @@ from collections import deque
 from dataclasses import dataclass, field
 
 import ray
+import torch
 from ray.util.queue import Queue
 
+from torchspec.data.utils import resolve_loss_mask
 from torchspec.training.data_fetcher import TrainSample
 from torchspec.utils.logging import logger
 from torchspec.utils.memory import estimate_tensor_bytes
+from torchspec.utils.processing import get_assistant_token_ids
 from torchspec.utils.types import InferenceInput, InferenceOutput
 
 _estimate_bytes = estimate_tensor_bytes
+
+
+def _has_supervised_tokens_from_packed_loss_mask(packed_loss_mask: str | None) -> bool:
+    if packed_loss_mask is None:
+        return True
+    try:
+        parts = [int(x) for x in packed_loss_mask.split(',') if x]
+    except ValueError:
+        return True
+    return any(length > 0 for i, length in enumerate(parts) if i % 2 == 1)
+
+
+def _has_supervised_tokens(result: InferenceOutput, args, assistant_header_ids, end_token_ids, skip_after_header: int) -> bool:
+    if result.packed_loss_mask is not None:
+        return _has_supervised_tokens_from_packed_loss_mask(result.packed_loss_mask)
+    if not getattr(args, "dynamic_loss_mask", False):
+        return True
+    if result.input_ids_list is None:
+        return True
+    input_ids = torch.tensor(result.input_ids_list, dtype=torch.long)
+    mask = resolve_loss_mask(
+        {"input_ids": input_ids, "last_turn_loss_only": result.metadata.get("has_thinking")},
+        dynamic_loss_mask=True,
+        assistant_header_ids=assistant_header_ids,
+        end_token_ids=end_token_ids,
+        last_turn_loss_only=getattr(args, "last_turn_loss_only", False),
+        skip_after_header=skip_after_header,
+    )
+    return mask is not None
 
 
 @dataclass
@@ -159,6 +191,7 @@ class AsyncTrainingController:
         self._training_monitor = SpeedMonitor(window_seconds=10.0)
         self._last_dispatch_log_time = 0.0
         self._inference_error: str | None = None
+        self.assistant_header_ids, self.end_token_ids, self.skip_after_header = get_assistant_token_ids(args)
 
     def _generate_data_id(self) -> str:
         self._data_id_counter += 1
@@ -357,6 +390,18 @@ class AsyncTrainingController:
             if result.data_id in self._eval_data_ids:
                 eval_results.append(result)
             else:
+                if not _has_supervised_tokens(
+                    result,
+                    self.args,
+                    self.assistant_header_ids,
+                    self.end_token_ids,
+                    self.skip_after_header,
+                ):
+                    logger.warning(
+                        f"Dropping training sample with all-zero loss mask before pooling "
+                        f"(data_id={result.data_id}, mooncake_key={result.mooncake_key})"
+                    )
+                    continue
                 train_results.append(result)
 
         if eval_results:

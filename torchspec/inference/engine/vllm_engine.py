@@ -537,14 +537,23 @@ class VllmEngine(InferenceEngine, RayActor):
                 f"does not match batch size {batch_size}"
             )
 
+        max_prompt_len = getattr(self.args, "max_seq_length", None)
+        if max_prompt_len:
+            max_prompt_len -= 1
+
+        tokenizer = self._engine.get_tokenizer() if formatted_prompts is not None else None
         prompts: list = []
         for i in range(batch_size):
             if formatted_prompts is not None:
-                prompt_dict: dict = {"prompt": formatted_prompts[i]}
+                token_ids = tokenizer.encode(formatted_prompts[i], add_special_tokens=False)
+                if max_prompt_len and len(token_ids) > max_prompt_len:
+                    token_ids = token_ids[:max_prompt_len]
+                prompt_dict: dict = {"prompt_token_ids": token_ids}
             else:
-                prompt_dict = {
-                    "prompt_token_ids": self._normalize_input_ids(input_ids_list[i]).tolist()
-                }
+                token_ids = self._normalize_input_ids(input_ids_list[i]).tolist()
+                if max_prompt_len and len(token_ids) > max_prompt_len:
+                    token_ids = token_ids[:max_prompt_len]
+                prompt_dict = {"prompt_token_ids": token_ids}
 
             if multimodal_inputs is not None:
                 mm_data = self._to_vllm_multi_modal_data(multimodal_inputs[i])
