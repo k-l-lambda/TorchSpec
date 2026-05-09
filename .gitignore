@@ -89,3 +89,5 @@ wandb/log.txt
 
 .claude/
 wandb/
+
+k8s/jiuzhang/novitalabs-secret.yaml

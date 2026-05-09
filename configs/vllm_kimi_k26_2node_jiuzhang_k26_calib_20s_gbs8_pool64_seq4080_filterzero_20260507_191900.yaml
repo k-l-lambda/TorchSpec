@@ -1,0 +1,74 @@
+model:
+  target_model_path: /data1/models/Kimi-K2.6
+  trust_remote_code: true
+  lm_head_key: language_model.lm_head.weight
+  embedding_key: language_model.model.embed_tokens.weight
+
+dataset:
+  train_data_path: /data1/datasets/lightseekorg-kimi-mtp-dataset/data/train-00000-of-00001.jsonl
+  eval_data_path: /root/work/TorchSpec/examples/data/eval_conversations.jsonl
+  chat_template: kimi-k25-vlm
+  defer_tokenization: true
+  last_turn_loss_only: true
+
+training:
+  max_seq_length: 4080
+  seed: 42
+  micro_batch_size: 1
+  num_epochs: 1
+  num_train_steps: 20
+  save_interval: 1000
+  learning_rate: 5e-5
+  warmup_ratio: 0.015
+  max_grad_norm: 1
+  ttt_length: 4
+  draft_accumulation_steps: 1
+  training_num_nodes: 1
+  training_num_gpus_per_node: 8
+  attention_backend: flex_attention
+  max_concurrent_batches: 1
+  gradient_checkpointing: true
+  distributed_timeout_minutes: 30
+
+inference:
+  inference_engine_type: vllm
+  inference_num_gpus: 8
+  inference_num_gpus_per_engine: 8
+  inference_num_gpus_per_node: 8
+  max_sample_pool_size: 64
+  inference_buffer_threshold: 32
+  inference_fetch_batch: 8
+  inference_batch_size: 1
+  vllm:
+    tp_size: 8
+    mem_fraction_static: 0.75
+    extra_args:
+      max_num_batched_tokens: 4096
+      enforce_eager: true
+mooncake:
+  master_server_address: 172.31.13.51:51132
+  metadata_server: http://172.31.13.51:8886/metadata
+  hidden_dim: 7168
+  global_segment_size: 32GB
+  local_buffer_size: 8GB
+  protocol: tcp
+  enable_gpu_direct: false
+  device_name: ""
+
+output_dir: /data1/training/torchspec_k26_calib_20s_gbs8_pool64_seq4080_filterzero_20260507_191900
+cache_dir: /data1/cache/torchspec_k26_calib_20s_gbs8_pool64_seq4080_20260507_170725
+model_download_dir: /data1
+
+debug:
+  save_debug_train_data: null
+  debug_train_only: false
+  debug_inference_only: false
+
+logging:
+  report_to: none
+  wandb_key: null
+  wandb_project: torchspec_k26_jiuzhang
+  wandb_team: null
+  wandb_group: null
+  wandb_mode: disabled
+  wandb_random_suffix: true
