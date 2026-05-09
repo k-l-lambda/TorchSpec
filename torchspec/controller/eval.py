@@ -33,7 +33,7 @@ from tqdm import tqdm
 from torchspec.training.checkpoint import _read_checkpoint_metadata, _write_checkpoint_metadata
 from torchspec.utils.logging import logger
 
-EVAL_CACHE_IDLE_TIMEOUT = 300.0
+DEFAULT_EVAL_CACHE_IDLE_TIMEOUT = 300.0
 
 
 @dataclass
@@ -47,17 +47,18 @@ class EvalSetupState:
     eval_dataset_size: int
     dp_size: int
     initial_eval_submit_count: int = 0
+    idle_timeout: float = DEFAULT_EVAL_CACHE_IDLE_TIMEOUT
 
 
 def _check_idle_timeout(
-    dispatched_samples: int, last_progress_at: float, total_samples: int
+    dispatched_samples: int, last_progress_at: float, total_samples: int, idle_timeout: float
 ) -> None:
     idle_for = time.monotonic() - last_progress_at
-    if idle_for >= EVAL_CACHE_IDLE_TIMEOUT:
+    if idle_for >= idle_timeout:
         raise TimeoutError(
             "Timed out while waiting for eval cache generation "
             f"(no progress during eval for {idle_for:.1f}s, "
-            f"idle_timeout={EVAL_CACHE_IDLE_TIMEOUT:.1f}s, "
+            f"idle_timeout={idle_timeout:.1f}s, "
             f"dispatched={dispatched_samples}/{total_samples} samples)"
         )
 
@@ -106,6 +107,7 @@ def generate_eval_cache(
     dp_size = eval_state.dp_size
     dispatch_bs = eval_state.eval_dispatch_bs
     eval_cache_path = eval_state.eval_cache_path
+    idle_timeout = eval_state.idle_timeout
 
     last_progress_at = time.monotonic()
     logger.info(
@@ -128,7 +130,9 @@ def generate_eval_cache(
             last_progress_at = time.monotonic()
             eval_progress.update(dispatch_bs)
         else:
-            _check_idle_timeout(dispatched_samples, last_progress_at, eval_dataset_size)
+            _check_idle_timeout(
+                dispatched_samples, last_progress_at, eval_dataset_size, idle_timeout
+            )
             time.sleep(0.01)
 
     eval_progress.close()
@@ -215,4 +219,5 @@ def setup_eval(controller, train_group, args, eval_dataset_size: int) -> EvalSet
         eval_dataset_size=eval_dataset_size,
         dp_size=args.dp_size,
         initial_eval_submit_count=initial_eval_submit_count,
+        idle_timeout=float(getattr(args, "eval_cache_idle_timeout", DEFAULT_EVAL_CACHE_IDLE_TIMEOUT)),
     )

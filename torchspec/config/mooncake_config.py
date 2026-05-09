@@ -70,6 +70,8 @@ class MooncakeConfig:
     get_retry_wait_seconds: float = 0.5
     get_retry_log_interval_seconds: float = 10.0
     get_retry_max_wait_seconds: float = 60.0
+    put_retry_attempts: int = 3
+    put_retry_wait_seconds: float = 1.0
     kv_lease_ttl_s: float = 5.0  # Mooncake master lease TTL only; not used for deletion timing
 
     def __post_init__(self):
@@ -153,6 +155,8 @@ class MooncakeConfig:
                 getattr(args, "max_seq_length", 8192),
             ),
             "hidden_dim": getattr(args, "mooncake_hidden_dim", 4096),
+            "put_retry_attempts": getattr(args, "mooncake_put_retry_attempts", 3),
+            "put_retry_wait_seconds": getattr(args, "mooncake_put_retry_wait_seconds", 1.0),
         }
 
         if metadata_server is not None:
@@ -188,6 +192,8 @@ class MooncakeConfig:
             self.get_retry_log_interval_seconds
         )
         os.environ["MOONCAKE_GET_RETRY_MAX_WAIT_SECONDS"] = str(self.get_retry_max_wait_seconds)
+        os.environ["MOONCAKE_PUT_RETRY_ATTEMPTS"] = str(self.put_retry_attempts)
+        os.environ["MOONCAKE_PUT_RETRY_WAIT_SECONDS"] = str(self.put_retry_wait_seconds)
         os.environ["MOONCAKE_ENABLE_HARD_PIN"] = "1" if self.enable_hard_pin else "0"
 
     @classmethod
@@ -208,6 +214,8 @@ class MooncakeConfig:
             os.getenv("MOONCAKE_GET_RETRY_LOG_INTERVAL_SECONDS", "5.0")
         )
         get_retry_max_wait_seconds = float(os.getenv("MOONCAKE_GET_RETRY_MAX_WAIT_SECONDS", "5.0"))
+        put_retry_attempts = int(os.getenv("MOONCAKE_PUT_RETRY_ATTEMPTS", "3"))
+        put_retry_wait_seconds = float(os.getenv("MOONCAKE_PUT_RETRY_WAIT_SECONDS", "1.0"))
 
         host_buffer_env = os.getenv("MOONCAKE_HOST_BUFFER_SIZE")
         host_buffer_size = int(host_buffer_env) if host_buffer_env is not None else None
@@ -239,6 +247,8 @@ class MooncakeConfig:
             get_retry_wait_seconds=get_retry_wait_seconds,
             get_retry_log_interval_seconds=get_retry_log_interval_seconds,
             get_retry_max_wait_seconds=get_retry_max_wait_seconds,
+            put_retry_attempts=put_retry_attempts,
+            put_retry_wait_seconds=put_retry_wait_seconds,
             enable_hard_pin=os.getenv("MOONCAKE_ENABLE_HARD_PIN", "0") == "1",
         )
 

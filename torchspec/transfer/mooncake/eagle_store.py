@@ -194,16 +194,32 @@ class EagleMooncakeStore(MooncakeHiddenStateStore):
         buffer_ptrs: List[int],
         sizes: List[int],
     ) -> None:
-        """Synchronous batch_put_from with error handling."""
+        """Synchronous batch_put_from with bounded retry."""
         total_bytes = sum(sizes)
-        if self._replicate_config is not None:
-            results = self._store.batch_put_from(
-                keys, buffer_ptrs, sizes, config=self._replicate_config
-            )
-        else:
-            results = self._store.batch_put_from(keys, buffer_ptrs, sizes)
-        failures = [(k, r) for k, r in zip(keys, results) if r != 0]
-        if failures:
+        max_attempts = max(int(getattr(self.config, "put_retry_attempts", 1)), 1)
+        wait_seconds = max(float(getattr(self.config, "put_retry_wait_seconds", 0.0)), 0.0)
+        last_failures = []
+
+        for attempt in range(1, max_attempts + 1):
+            if self._replicate_config is not None:
+                results = self._store.batch_put_from(
+                    keys, buffer_ptrs, sizes, config=self._replicate_config
+                )
+            else:
+                results = self._store.batch_put_from(keys, buffer_ptrs, sizes)
+
+            failures = [(k, r) for k, r in zip(keys, results) if r != 0]
+            if not failures:
+                if attempt > 1:
+                    logger.info(
+                        "batch_put_from succeeded after retry (attempt %d/%d, keys=%s)",
+                        attempt,
+                        max_attempts,
+                        keys,
+                    )
+                return
+
+            last_failures = failures
             try:
                 self._store.batch_remove(keys, force=True)
             except Exception:
@@ -212,18 +228,32 @@ class EagleMooncakeStore(MooncakeHiddenStateStore):
                     keys,
                     exc_info=True,
                 )
-            failure_details = ", ".join(f"{k} (code={r})" for k, r in failures)
-            config_details = (
-                f"total_bytes={_format_bytes(total_bytes)}, "
-                f"global_segment_size={_format_bytes(self.config.global_segment_size)}, "
-                f"local_buffer_size={_format_bytes(self.config.local_buffer_size)}, "
-                f"host_buffer_size={_format_bytes(self.config.host_buffer_size)}"
-            )
-            raise RuntimeError(
-                f"batch_put_from failed for keys: {failure_details}. "
-                f"{config_details}. Consider increasing Mooncake segment/buffer sizes "
-                "or reducing batch/sequence length/prefetch depth."
-            )
+
+            if attempt < max_attempts:
+                failure_details = ", ".join(f"{k} (code={r})" for k, r in failures)
+                logger.warning(
+                    "batch_put_from failed for keys: %s; retrying attempt %d/%d after %.2fs",
+                    failure_details,
+                    attempt + 1,
+                    max_attempts,
+                    wait_seconds,
+                )
+                if wait_seconds > 0:
+                    time.sleep(wait_seconds)
+
+        failure_details = ", ".join(f"{k} (code={r})" for k, r in last_failures)
+        config_details = (
+            f"total_bytes={_format_bytes(total_bytes)}, "
+            f"global_segment_size={_format_bytes(self.config.global_segment_size)}, "
+            f"local_buffer_size={_format_bytes(self.config.local_buffer_size)}, "
+            f"host_buffer_size={_format_bytes(self.config.host_buffer_size)}, "
+            f"put_retry_attempts={max_attempts}"
+        )
+        raise RuntimeError(
+            f"batch_put_from failed for keys: {failure_details}. "
+            f"{config_details}. Consider increasing Mooncake segment/buffer sizes "
+            "or reducing batch/sequence length/prefetch depth."
+        )
 
     @staticmethod
     def _stage_tensors_into_buffer(buf, tensors: List[torch.Tensor]) -> Tuple[List[int], List[int]]:

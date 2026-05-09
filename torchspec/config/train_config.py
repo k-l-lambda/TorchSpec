@@ -37,6 +37,7 @@ class DatasetConfig:
     defer_tokenization: bool = False
     eval_data_path: Optional[str] = None
     eval_interval: int = 50
+    eval_cache_idle_timeout: float = 300.0
     eval_micro_batch_size: Optional[int] = None
     eval_prompt_key: Optional[str] = None
     last_turn_loss_only: Any = "auto"  # bool or "auto"
