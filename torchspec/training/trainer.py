@@ -226,6 +226,7 @@ class Trainer(abc.ABC):
             last_turn_loss_only=self.last_turn_loss_only,
             skip_after_header=self.skip_after_header,
             min_loss_tokens=getattr(self.args, "min_loss_tokens", 0),
+            skip_zero_loss_samples=False,
         )
         self._eval_collator = collator
         self._eval_cache: list[dict] = []

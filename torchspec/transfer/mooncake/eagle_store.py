@@ -116,18 +116,16 @@ class EagleMooncakeStore(MooncakeHiddenStateStore):
             buf = self._gpu_send_buffer
             buffer_ptrs, sizes = self._stage_tensors_into_buffer(buf, tensors)
             self._do_sync_batch_put(keys, buffer_ptrs, sizes)
-        elif self._host_buffer_pool is None or self._async_put_manager is None:
+        elif self._host_buffer_pool is None:
             raise RuntimeError(
                 "put() requires either GPU Direct (enable_gpu_direct=True) or "
-                "async host-buffer puts (async_put_pool_size > 0). "
-                "Current config has async_put_pool_size=0 and GPU Direct is "
-                f"{'enabled but gpu_send_buffer failed to initialize' if self._gpu_direct_available else 'disabled'}. "
-                "Set async_put_pool_size >= 1 or enable GPU Direct."
+                "host-buffer puts. Host buffer pool was not initialized."
             )
         else:
             buf = self._host_buffer_pool.get_buffer()
-            self._async_put_manager.check_last_error()
-            self._async_put_manager.wait_for_buffer(buf.ptr)
+            if self._async_put_manager is not None:
+                self._async_put_manager.check_last_error()
+                self._async_put_manager.wait_for_buffer(buf.ptr)
 
             # Stage DtoH on a dedicated stream so the default (compute) stream
             # is free to run the next prefill concurrently.
@@ -144,14 +142,18 @@ class EagleMooncakeStore(MooncakeHiddenStateStore):
                 if t.is_cuda:
                     t.record_stream(self._copy_stream)
 
-            self._async_put_manager.submit(
-                keys,
-                buffer_ptrs,
-                sizes,
-                buf.ptr,
-                wait_event=copy_done,
-                device_index=self._copy_stream.device.index,
-            )
+            if self._async_put_manager is not None:
+                self._async_put_manager.submit(
+                    keys,
+                    buffer_ptrs,
+                    sizes,
+                    buf.ptr,
+                    wait_event=copy_done,
+                    device_index=self._copy_stream.device.index,
+                )
+            else:
+                copy_done.synchronize()
+                self._do_sync_batch_put(keys, buffer_ptrs, sizes)
 
         shapes = {
             "hidden_states": tuple(hidden_states.shape),

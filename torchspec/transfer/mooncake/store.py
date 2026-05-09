@@ -99,20 +99,23 @@ class MooncakeHiddenStateStore(ABC):
         self._build_replicate_config()
 
         pool_size = self.config.async_put_pool_size
+        host_pool_size = max(pool_size, 1)
+        self._host_buffer_pool = HostBufferPool(
+            buffer_size=self.config.host_buffer_size,
+            pool_size=host_pool_size,
+        )
+        self._host_buffer_pool.initialize()
+
+        for buf in self._host_buffer_pool._buffers:
+            self._register_buffer(buf.ptr, buf.size)
+
         if pool_size > 0:
-            self._host_buffer_pool = HostBufferPool(
-                buffer_size=self.config.host_buffer_size,
-                pool_size=pool_size,
-            )
-            self._host_buffer_pool.initialize()
-
-            for buf in self._host_buffer_pool._buffers:
-                self._register_buffer(buf.ptr, buf.size)
-
             self._async_put_manager = AsyncPutManager(
                 store=self._store, max_workers=pool_size, replicate_config=self._replicate_config
             )
             logger.info("Async put manager created (pool_size=%d)", pool_size)
+        else:
+            logger.info("Using synchronous host-buffer Mooncake puts")
 
         if self.config.enable_gpu_direct and torch.cuda.is_available():
             self._setup_gpu_direct(device)
